@@ -1,0 +1,14 @@
+{
+  "name": "visa-bot-admin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Turan Int. School — viza holatlarini avtomatik tekshirish admin paneli (Telegram Web App)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  }
+}
