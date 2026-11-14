@@ -38,6 +38,11 @@ export const config = {
   // Faqat test uchun (production'da e'tiborga olinmaydi)
   upstream: !isProd && env.VISA_UPSTREAM_DEV ? env.VISA_UPSTREAM_DEV : "https://visadoctors.uz/api/en/visas/v2/check-status/",
   telegramApi: !isProd && env.TELEGRAM_API_DEV ? env.TELEGRAM_API_DEV : "https://api.telegram.org",
+  // Elektron viza sahifasi faqat shu domen(lar)dan
+  pdfHosts: ["www.visa.go.kr", "visa.go.kr"],
+  pdfHostsDev: !isProd && env.VISA_PDF_HOST_DEV ? [env.VISA_PDF_HOST_DEV] : [],
+  // Headless Chromium (Docker image'da o'rnatilgan). Topilmasa — PDF faqat to'g'ridan-to'g'ri yuklanadi.
+  chromiumPath: env.CHROMIUM_PATH || "",
   pollIntervalMs: !isProd && env.POLL_INTERVAL_DEV_MS ? Number(env.POLL_INTERVAL_DEV_MS) : 2000,
 };
 

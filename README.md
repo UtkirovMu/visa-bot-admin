@@ -11,6 +11,17 @@ Panel [visabot](https://github.com/UtkirovMu/visabot) orqali ochiladi: adminda `
 - «Hozir tekshirish» (bitta odam) va «Hammasini tekshirish».
 - Har bir odam uchun oxirgi holat va tekshiruvlar tarixi (oxirgi 60 ta).
 - Viza chiqsa (elchixona holati `발급` yoki `허가`), adminga **bir marta** Telegram xabari yuboriladi. Xabar yetib bormasa, keyingi tekshiruvda qayta yuboriladi.
+- **Elektron viza (PDF):** viza chiqqanda API `pdf_url` va `pdf_params` qaytarsa, PDF avtomatik yaratilib, adminga Telegram'da hujjat bo'lib yuboriladi (bir marta). Panelda «Elektron vizani yuklab olish» tugmasi uni istalgan payt qayta yuboradi.
+- Viza berilgan sana, amal qilish muddati (`expiry_date`) va viza toifasi (`D-4-1`) ham ko'rsatiladi.
+
+### Elektron viza PDF qanday olinadi
+
+`pdf_url` visa.go.kr'ning chop etish sahifasi bo'lib, unga `pdf_params` POST forma bilan yuboriladi.
+
+1. Server avval sahifani to'g'ridan-to'g'ri so'raydi. Javob PDF bo'lsa, o'zini yuboradi.
+2. HTML bo'lsa, server ichidagi headless Chromium (DevTools protokoli orqali) formani yuborib, sahifani xuddi brauzerdagidek cookie va surat bilan ochadi va PDF'ga chop etadi.
+
+Bu jarayonda Chromium faqat `*.go.kr` manzillariga so'rov yubora oladi, qolganlari bloklanadi. Bir vaqtda faqat bitta PDF yaratiladi (60 soniyalik chegara bilan), vaqtinchalik fayllar darhol o'chiriladi. `pdf_params` da shaxsiy ma'lumot bor, shuning uchun bazada shifrlangan holda saqlanadi.
 
 ## Xavfsizlik
 
@@ -24,10 +35,11 @@ Panel [visabot](https://github.com/UtkirovMu/visabot) orqali ochiladi: adminda `
 | XSS | CSP: `script-src 'self'`, inline skript va stil yo'q. Interfeys ma'lumotni faqat `textContent` orqali chiqaradi |
 | Clickjacking | `frame-ancestors 'self' https://web.telegram.org` |
 | Statik fayllar | Faqat 4 ta ruxsat etilgan fayl, path traversal imkonsiz |
-| Tashqi so'rovlar | visadoctors va Telegram manzillari kodda qat'iy belgilangan (SSRF yo'q), timeout va javob hajmi cheklangan |
+| Tashqi so'rovlar | visadoctors va Telegram manzillari kodda qat'iy belgilangan (SSRF yo'q), timeout va javob hajmi cheklangan. Elektron viza havolasi faqat `https://www.visa.go.kr` bo'lsa qabul qilinadi |
+| Chromium | Faqat PDF uchun, `*.go.kr` dan boshqa barcha tarmoq so'rovlari bloklanadi, root'siz ishlaydi |
 | Loglar | Pasport va ism log qilinmaydi, Telegram xabarida pasport yashiriladi (`FB24•••48`) |
 | Konteyner | Ilova root emas, `node` foydalanuvchisi sifatida ishlaydi. Baza papkasi `700` huquqli |
-| Bog'liqliklar | **Tashqi paketlar yo'q** (`node:http`, `node:sqlite`, `node:crypto`), demak paketlar orqali keladigan hujum (supply chain) xavfi ham yo'q |
+| Bog'liqliklar | **Tashqi npm paketlar yo'q** (`node:http`, `node:sqlite`, `node:crypto`, ichki `WebSocket`/`FormData`). Docker image'ga faqat Debian'ning `chromium` va shrift paketlari qo'shilgan |
 
 ## Railway'ga joylash
 
@@ -59,7 +71,7 @@ Servis bitta nusxada ishlashi kerak (`railway.json` da `numReplicas: 1`), chunki
 ## Ishlab chiqish
 
 ```bash
-npm test     # 22 ta test: shifrlash, Telegram imzosi, rejalashtirgich, to'liq API oqimi
+npm test     # 31 ta test: shifrlash, Telegram imzosi, rejalashtirgich, elektron viza PDF, to'liq API oqimi
 npm start    # BOT_TOKEN, ADMIN_IDS, DATA_KEY, DB_PATH kerak
 ```
 

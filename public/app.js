@@ -292,7 +292,10 @@
       ["Pasport", p.passport],
       ["Tug'ilgan sana", fmtDate(p.birthDate)],
       ["Ariza sanasi", p.lastAppDate ? fmtDate(p.lastAppDate) : ""],
+      ["Viza berilgan sana", p.issued && p.lastReviewDate ? fmtDate(p.lastReviewDate) : ""],
+      ["Amal qilish muddati", p.lastExpiry ? `${fmtDate(p.lastExpiry)} gacha` : ""],
       ["Viza turi", tr(p.lastVisaType)],
+      ["Viza toifasi", p.lastStayQual],
       ["Elchixonada", tr(p.lastProgress)],
       ["Izoh", p.note],
       ["Oxirgi tekshiruv", p.lastCheckedAt ? fmtDateTime(p.lastCheckedAt) : "—"],
@@ -315,6 +318,12 @@
       li.append(el("span", "", fmtDateTime(h.at)), el("span", "", label));
       ul.append(li);
     }
+
+    // Elektron viza (PDF) — faqat viza chiqqan va visa.go.kr havolasi bo'lsa
+    $("dPdfBox").classList.toggle("hidden", !(p.issued && p.hasPdf));
+    $("dPdfNote").textContent = p.pdfSentAt
+      ? `Oxirgi marta yuborilgan: ${fmtDateTime(p.pdfSentAt)} · qayta yuborish mumkin`
+      : "PDF Telegram'ga, bot chatiga yuboriladi";
 
     const del = $("dDelete");
     del.classList.remove("confirm");
@@ -349,6 +358,30 @@
   }
 
   $("dCheck").addEventListener("click", (e) => current && checkNow(current.id, e.currentTarget));
+
+  $("dPdf").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    if (!current || btn.disabled) return;
+    const label = btn.querySelector("span");
+    const id = current.id;
+    btn.disabled = true;
+    btn.classList.add("loading");
+    label.textContent = "PDF tayyorlanmoqda…";
+    try {
+      const d = await api(`/api/people/${id}/pdf`, { method: "POST", body: {} });
+      toast(`📄 ${d.message}`);
+      const fresh = await api(`/api/people/${id}`);
+      const i = people.findIndex((x) => x.id === id);
+      if (i >= 0) people[i] = fresh.person;
+      if (current && current.id === id) renderDetail(fresh.person, fresh.history);
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      label.textContent = "Elektron vizani yuklab olish";
+    }
+  });
 
   $("dDelete").addEventListener("click", async (e) => {
     const btn = e.currentTarget;

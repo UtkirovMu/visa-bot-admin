@@ -3,8 +3,9 @@
 // Viza chiqsa — adminga Telegram xabari (har bir odam uchun bir marta).
 
 import { config } from "./config.js";
-import { getPerson, listPersonIds, markIssuedNotified, saveCheck } from "./db.js";
-import { notifyIssued } from "./telegram.js";
+import { getPdfInfo, getPerson, listPersonIds, markIssuedNotified, markPdfSent, saveCheck } from "./db.js";
+import { getVisaPdf } from "./pdf.js";
+import { notifyIssued, sendVisaPdf } from "./telegram.js";
 import { checkVisa, isIssued } from "./visa.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -52,9 +53,31 @@ export async function checkPerson(id) {
     if (isIssued(result) && !person.issuedNotifiedAt) {
       if (await notifyIssued(person, result)) markIssuedNotified(id);
     }
+    // Elektron viza PDF'i — avtomatik, bir marta (yetib bormasa keyingi tekshiruvda qayta urinadi)
+    if (isIssued(result) && !getPerson(id)?.pdfSentAt && getPdfInfo(id)) {
+      const r = await deliverPdf(id);
+      if (!r.ok) console.warn(`[pdf] #${id}: ${r.message}`);
+    }
     return { result };
   } finally {
     inFlight.delete(id);
+  }
+}
+
+/** Elektron viza PDF'ini yaratib, adminlarga Telegram'da yuborish. */
+export async function deliverPdf(id) {
+  const person = getPerson(id);
+  const info = getPdfInfo(id);
+  if (!person) return { ok: false, notFound: true, message: "Topilmadi" };
+  if (!info) return { ok: false, message: "Bu odam uchun elektron viza hali yo'q" };
+  try {
+    const buf = await getVisaPdf(info);
+    if (!(await sendVisaPdf(person, buf))) return { ok: false, message: "PDF tayyor, lekin Telegram'ga yuborib bo'lmadi" };
+    markPdfSent(id);
+    console.log(`[pdf] #${id}: yuborildi (${Math.round(buf.length / 1024)} KB)`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "PDF yaratib bo'lmadi" };
   }
 }
 

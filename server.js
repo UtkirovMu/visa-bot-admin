@@ -10,7 +10,7 @@ import { verifyInitData } from "./src/auth.js";
 import { config, validateConfig } from "./src/config.js";
 import { initCrypto } from "./src/crypto.js";
 import { addPerson, countPeople, deletePerson, getPerson, history, initDb, listPeople } from "./src/db.js";
-import { checkPerson, runAll, schedulerStatus, startScheduler, stopScheduler } from "./src/scheduler.js";
+import { checkPerson, deliverPdf, runAll, schedulerStatus, startScheduler, stopScheduler } from "./src/scheduler.js";
 import { fullName, maskPassport, parsePerson } from "./src/validate.js";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -163,11 +163,16 @@ const publicPerson = (p) => ({
   lastVisaType: p.lastVisaType,
   lastEta: p.lastEta,
   lastError: p.lastError,
+  lastExpiry: p.lastExpiry,
+  lastReviewDate: p.lastReviewDate,
+  lastStayQual: p.lastStayQual,
+  hasPdf: p.hasPdf,
+  pdfSentAt: p.pdfSentAt,
   issued: ["발급", "허가"].includes(p.lastProgress),
 });
 
 async function api(req, res, path, admin) {
-  const m = path.match(/^\/api\/people\/(\d{1,9})(\/check)?$/);
+  const m = path.match(/^\/api\/people\/(\d{1,9})(\/check|\/pdf)?$/);
 
   if (path === "/api/me" && req.method === "GET") {
     return json(res, 200, { ok: true, admin: { firstName: admin.firstName } });
@@ -204,7 +209,17 @@ async function api(req, res, path, admin) {
     return json(res, 200, { ok: true });
   }
 
-  if (m && m[2] && req.method === "POST") {
+  if (m && m[2] === "/pdf" && req.method === "POST") {
+    const wait = limited(`pdf:${admin.id}`, 10, 10 * 60_000);
+    if (wait) return fail(res, 429, "Juda ko'p urinish. Birozdan so'ng urinib ko'ring.", { "Retry-After": String(wait) });
+    const r = await deliverPdf(Number(m[1]));
+    if (r.notFound) return fail(res, 404, "Topilmadi.");
+    if (!r.ok) return fail(res, 502, r.message);
+    console.log(`[admin ${admin.id}] PDF so'radi: #${m[1]}`);
+    return json(res, 200, { ok: true, message: "Elektron viza Telegram'ga yuborildi." });
+  }
+
+  if (m && m[2] === "/check" && req.method === "POST") {
     const wait = limited(`check:${admin.id}`, 30, 10 * 60_000);
     if (wait) return fail(res, 429, "Juda ko'p tekshiruv. Birozdan so'ng urinib ko'ring.", { "Retry-After": String(wait) });
     const r = await checkPerson(Number(m[1]));

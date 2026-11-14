@@ -42,10 +42,49 @@ export async function notifyIssued(person, result) {
   lines.push("", `📌 Holat: <b>${esc(v.status || tr(v.progressStatus))}</b>`);
   if (v.progressStatus) lines.push(`🏛 Elchixonada: ${esc(tr(v.progressStatus))}`);
   if (v.applicationDate) lines.push(`📅 Ariza sanasi: ${esc(v.applicationDate)}`);
-  if (v.visaType) lines.push(`🗂 Viza turi: ${esc(tr(v.visaType))}`);
-  lines.push("", "Batafsil — admin panelda.");
+  if (v.visaType) lines.push(`🗂 Viza turi: ${esc(tr(v.visaType))}${v.stayQualification ? ` (${esc(v.stayQualification)})` : ""}`);
+  if (v.reviewDate) lines.push(`✅ Berilgan sana: ${esc(v.reviewDate)}`);
+  if (v.expiryDate) lines.push(`⏳ Amal qilish muddati: ${esc(v.expiryDate)} gacha`);
+  lines.push("", v.pdf ? "📄 Elektron viza (PDF) alohida yuboriladi." : "Batafsil — admin panelda.");
 
   let delivered = false;
   for (const id of config.adminIds) delivered = (await sendMessage(id, lines.join("\n"))) || delivered;
+  return delivered;
+}
+
+/** Hujjat (PDF) yuborish — multipart, Node ichidagi FormData bilan. */
+async function sendDocument(chatId, buf, filename, caption) {
+  try {
+    const fd = new FormData();
+    fd.append("chat_id", String(chatId));
+    fd.append("caption", caption);
+    fd.append("parse_mode", "HTML");
+    fd.append("document", new Blob([buf], { type: "application/pdf" }), filename);
+    const res = await fetch(`${config.telegramApi}/bot${config.botToken}/sendDocument`, {
+      method: "POST",
+      body: fd,
+      redirect: "error",
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      console.warn("[telegram] sendDocument:", res.status, body?.description ?? "");
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn("[telegram] sendDocument xatosi:", e?.name ?? "unknown");
+    return false;
+  }
+}
+
+const safeFile = (s) => s.normalize("NFKD").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60) || "viza";
+
+/** Elektron viza PDF'ini barcha adminlarga yuboradi. Kamida bittasiga yetib borsa — true. */
+export async function sendVisaPdf(person, buf) {
+  const filename = `Viza_${safeFile(`${person.surname} ${person.name}`)}.pdf`;
+  const caption = `📄 <b>Elektron viza</b>\n👤 ${esc(fullName(person))}\n🛂 ${esc(maskPassport(person.passport))}`;
+  let delivered = false;
+  for (const id of config.adminIds) delivered = (await sendDocument(id, buf, filename, caption)) || delivered;
   return delivered;
 }

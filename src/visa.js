@@ -56,6 +56,7 @@ export function toResult(data) {
   const pi = obj(vd.processing_info);
   const color = str(vd.color_background, 7);
   const date = str(vd.application_date, 10);
+  const isoDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(str(v, 10)) ? str(v, 10) : "");
   return {
     state: "done",
     visa: {
@@ -66,8 +67,45 @@ export function toResult(data) {
       progressStatus: str(vd.progress_status, 60),
       applicationDate: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "",
       processing: pi ? { isDelayed: pi.is_delayed === true, message: str(pi.status_message, 200) } : null,
+      expiryDate: isoDate(vd.expiry_date),
+      reviewDate: isoDate(vd.review_date),
+      stayQualification: str(vd.stay_qualification, 20).replace(/[^A-Za-z0-9-]/g, ""),
+      pdf: parsePdf(vd),
     },
   };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Elektron viza (PDF) ma'lumoti                                       */
+/* ------------------------------------------------------------------ */
+// Faqat visa.go.kr (https) manzillari qabul qilinadi; parametrlar kalit/qiymat bo'yicha qat'iy tekshiriladi.
+
+export function isAllowedPdfUrl(u) {
+  try {
+    const url = new URL(u);
+    return (url.protocol === "https:" && config.pdfHosts.includes(url.hostname) && !url.port && !url.username && !url.password)
+      || (!config.isProd && config.pdfHostsDev.includes(url.host) && url.protocol === "http:");
+  } catch {
+    return false;
+  }
+}
+
+function parsePdf(vd) {
+  if (vd.requires_pdf !== true) return null;
+  const url = str(vd.pdf_url, 300);
+  const raw = obj(vd.pdf_params);
+  if (!isAllowedPdfUrl(url) || !raw) return null;
+  const params = {};
+  let n = 0;
+  for (const [k, v] of Object.entries(raw)) {
+    if (++n > 30 || !/^[A-Za-z_][A-Za-z0-9_]{0,40}$/.test(k)) return null;
+    if (v !== null && typeof v !== "string" && typeof v !== "number") return null;
+    const val = v === null ? "" : String(v);
+    if (val.length > 300 || /[\u0000-\u001f\u007f]/.test(val)) return null;
+    if (/^https?:\/\//i.test(val) && !isAllowedPdfUrl(val)) return null; // masalan IN_PHOTO — faqat visa.go.kr
+    params[k] = val;
+  }
+  return { url, params };
 }
 
 /** Bitta odamni tekshiradi. Natija: { state: done | not_found | error, visa?, message? } */

@@ -46,6 +46,15 @@ export function initDb(path) {
     );
     CREATE INDEX IF NOT EXISTS checks_person_at ON checks (person_id, at DESC);
   `);
+  // Migratsiya: yangi ustunlar (mavjud bazalar uchun)
+  const cols = new Set(db.prepare("PRAGMA table_info(people)").all().map((c) => c.name));
+  for (const [name, type] of [
+    ["last_expiry", "TEXT"], ["last_review_date", "TEXT"], ["last_stay_qual", "TEXT"],
+    ["last_pdf", "TEXT"], // elektron viza parametrlari (shaxsiy ma'lumot bor) — shifrlangan
+    ["pdf_sent_at", "INTEGER"],
+  ]) {
+    if (!cols.has(name)) db.exec(`ALTER TABLE people ADD COLUMN ${name} ${type}`);
+  }
 }
 
 const rowToPerson = (r) => {
@@ -71,8 +80,28 @@ const rowToPerson = (r) => {
     lastEta: r.last_eta,
     lastError: r.last_error,
     issuedNotifiedAt: r.issued_notified_at,
+    lastExpiry: r.last_expiry,
+    lastReviewDate: r.last_review_date,
+    lastStayQual: r.last_stay_qual,
+    hasPdf: Boolean(r.last_pdf),
+    pdfSentAt: r.pdf_sent_at,
   };
 };
+
+/** Elektron viza parametrlari (shifr ochilgan). Yo'q bo'lsa — null. */
+export function getPdfInfo(id) {
+  const r = db.prepare("SELECT last_pdf FROM people WHERE id = ?").get(id);
+  if (!r?.last_pdf) return null;
+  try {
+    return unseal(r.last_pdf);
+  } catch {
+    return null;
+  }
+}
+
+export function markPdfSent(id) {
+  db.prepare("UPDATE people SET pdf_sent_at = ? WHERE id = ?").run(Date.now(), id);
+}
 
 /** Yangi odam qo'shish. Shu pasport bilan odam bor bo'lsa — null. */
 export function addPerson(person) {
@@ -114,11 +143,15 @@ export function saveCheck(id, r) {
     db.prepare(`
       UPDATE people SET
         last_checked_at = ?, last_state = ?, last_status = ?, last_progress = ?, last_color = ?,
-        last_text = ?, last_app_date = ?, last_visa_type = ?, last_eta = ?, last_error = NULL
+        last_text = ?, last_app_date = ?, last_visa_type = ?, last_eta = ?, last_error = NULL,
+        last_expiry = ?, last_review_date = ?, last_stay_qual = ?,
+        last_pdf = COALESCE(?, last_pdf)
       WHERE id = ?`).run(
       now, r.state, v.status ?? null, v.progressStatus ?? null, v.color ?? null,
       r.state === "done" ? v.responseText ?? null : r.message ?? null,
-      v.applicationDate ?? null, v.visaType ?? null, v.processing?.message ?? null, id,
+      v.applicationDate ?? null, v.visaType ?? null, v.processing?.message ?? null,
+      v.expiryDate || null, v.reviewDate || null, v.stayQualification || null,
+      v.pdf ? seal(v.pdf) : null, id,
     );
   }
   db.prepare("INSERT INTO checks (person_id, at, state, status, progress, message) VALUES (?, ?, ?, ?, ?, ?)").run(
