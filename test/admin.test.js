@@ -160,6 +160,7 @@ describe("server (to'liq oqim)", () => {
 
   let govkr, blocked;
   const blockedHits = [];
+  const pdfService = { mode: "ok", requests: [] }; // soxta visadoctors /download-pdf/
 
   before(async () => {
     // Ruxsat etilmagan "tashqi" server — Chromium unga murojaat qilmasligi kerak
@@ -173,6 +174,12 @@ describe("server (to'liq oqim)", () => {
       let b = "";
       req.on("data", (c) => (b += c));
       req.on("end", () => {
+        if (req.method === "POST" && req.url.startsWith("/download-pdf/")) {
+          pdfService.requests.push(JSON.parse(b));
+          if (pdfService.mode === "fail") { res.writeHead(500, { "content-type": "application/json" }); return res.end('{"detail":"server error"}'); }
+          res.writeHead(200, { "content-type": "application/pdf" });
+          return res.end(Buffer.from("%PDF-1.7\n% visadoctors-pdf " + "y".repeat(300) + "\n%%EOF"));
+        }
         res.setHeader("content-type", "application/json");
         if (req.method === "POST") {
           const body = JSON.parse(b);
@@ -224,6 +231,7 @@ describe("server (to'liq oqim)", () => {
         DATA_KEY, DB_PATH: dbPath, VISA_UPSTREAM_DEV: `http://127.0.0.1:${upstream.address().port}/x/`,
         TELEGRAM_API_DEV: `http://127.0.0.1:${telegram.address().port}`, POLL_INTERVAL_DEV_MS: "30", CHECK_DELAY_MS: "30",
         TRUST_PROXY: "true", VISA_PDF_HOST_DEV: `127.0.0.1:${govkr.address().port}`,
+        VISA_PDF_SERVICE_DEV: `http://127.0.0.1:${upstream.address().port}/download-pdf/`,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -331,21 +339,41 @@ describe("server (to'liq oqim)", () => {
     assert.equal(texts[0].path, `/bot${BOT_TOKEN}/sendMessage`);
 
     const docs = sent.filter((m) => m.path.endsWith("/sendDocument"));
-    if (!HAS_CHROMIUM) return; // Chromium yo'q muhitda PDF bosqichi o'tkazib yuboriladi
     assert.equal(docs.length, 1, "PDF avtomatik, faqat bir marta");
     const raw = docs[0].raw.toString("latin1");
-    assert.ok(raw.includes("%PDF-"), "hujjat PDF");
+    assert.ok(raw.includes("% visadoctors-pdf"), "PDF visadoctors xizmatidan olingan");
     assert.match(raw, /filename="Viza_VALIYEV_ALI\.pdf"/);
     assert.match(raw, new RegExp(`name="chat_id"\\r\\n\\r\\n${ADMIN}`));
+    // visadoctors'ga aynan API qaytargan pdf_url va pdf_params yuborilgan
+    const req0 = pdfService.requests.at(-1);
+    assert.match(req0.pdf_url, /selectElectronicVisaPrint3\.do$/);
+    assert.equal(req0.pdf_params.EV_SEQ, "UZ26VC023437");
     const after = await (await call(`/api/people/${id}`)).json();
     assert.ok(after.person.pdfSentAt);
-    // Chromium visa.go.kr sahifasini cookie bilan ochgan (surat yuklangan)
-    assert.ok(govLog.some((l) => l.url.startsWith("/biz/ap/ev/selectInviteeXvarmImage.do") && l.cookie.includes("JSESSIONID")));
-    // Ruxsat etilmagan tashqi resurs bloklangan
-    assert.deepEqual(blockedHits, [], "Chromium begona serverga murojaat qilmasligi kerak");
   });
 
-  test("PDF tugmasi: qayta yuborish", { skip: !HAS_CHROMIUM && "Chromium yo'q" }, async () => {
+  test("visadoctors PDF bermasa — Chromium bilan zaxira yo'l", { skip: !HAS_CHROMIUM && "Chromium yo'q" }, async () => {
+    pdfService.mode = "fail";
+    try {
+      const people = (await (await call("/api/people")).json()).people;
+      const id = people.find((p) => p.passport === "AP1234567").id;
+      const before = tgMessages.length;
+      const r = await call(`/api/people/${id}/pdf`, { method: "POST", body: {} });
+      assert.equal(r.status, 200);
+      const docs = tgMessages.slice(before).filter((m) => m.path.endsWith("/sendDocument"));
+      assert.equal(docs.length, 1);
+      const raw = docs[0].raw.toString("latin1");
+      assert.ok(raw.includes("%PDF-") && !raw.includes("visadoctors-pdf"), "Chromium yaratgan PDF");
+      // Chromium visa.go.kr sahifasini cookie bilan ochgan (surat yuklangan)
+      assert.ok(govLog.some((l) => l.url.startsWith("/biz/ap/ev/selectInviteeXvarmImage.do") && l.cookie.includes("JSESSIONID")));
+      // Ruxsat etilmagan tashqi resurs bloklangan
+      assert.deepEqual(blockedHits, [], "Chromium begona serverga murojaat qilmasligi kerak");
+    } finally {
+      pdfService.mode = "ok";
+    }
+  });
+
+  test("PDF tugmasi: qayta yuborish", async () => {
     const people = (await (await call("/api/people")).json()).people;
     const id = people.find((p) => p.passport === "AP1234567").id;
     const before = tgMessages.length;

@@ -25,7 +25,62 @@ export function findChromium() {
   return candidates.find((p) => existsSync(p)) || null;
 }
 
-/** 1-yo'l: to'g'ridan-to'g'ri POST. PDF bo'lsa Buffer, aks holda null. */
+/** Javob tanasini hajm chegarasi bilan o'qish. */
+async function readCapped(res) {
+  const len = Number(res.headers.get("content-length") || 0);
+  if (len > MAX_PDF) {
+    await res.body?.cancel().catch(() => {});
+    throw new Error("javob juda katta");
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > MAX_PDF) throw new Error("javob juda katta");
+  return buf;
+}
+
+/** 1-yo'l: visadoctors'ning PDF xizmati (sayt o'zi shu orqali yuklab beradi). */
+async function fetchViaVisadoctors({ url, params }) {
+  let res;
+  try {
+    res = await fetch(config.pdfServiceUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/pdf,application/json;q=0.9,*/*;q=0.8",
+        Origin: "https://visadoctors.uz",
+        Referer: "https://visadoctors.uz/uz/visa-status",
+        "User-Agent": UA,
+      },
+      body: JSON.stringify({ pdf_url: url, pdf_params: params }),
+      redirect: "error",
+      signal: AbortSignal.timeout(90_000),
+    });
+  } catch (e) {
+    throw new Error(e?.name === "TimeoutError" ? "javob kutish vaqti tugadi" : "ulanib bo'lmadi");
+  }
+  if (!res.ok) {
+    await res.body?.cancel().catch(() => {});
+    throw new Error(`HTTP ${res.status}`);
+  }
+  const buf = await readCapped(res);
+  if (isPdf(buf)) return buf;
+  // Ba'zan PDF JSON ichida base64 ko'rinishida kelishi mumkin
+  try {
+    const j = JSON.parse(buf.toString("utf8"));
+    for (const k of ["pdf", "file", "data", "content", "pdf_base64"]) {
+      if (typeof j?.[k] === "string") {
+        const d = Buffer.from(j[k].replace(/^data:application\/pdf;base64,/, ""), "base64");
+        if (isPdf(d)) return d;
+      }
+    }
+    const msg = j?.message || j?.error || j?.detail;
+    if (typeof msg === "string") throw new Error(msg.slice(0, 150));
+  } catch (e) {
+    if (e instanceof Error && !(e instanceof SyntaxError)) throw e;
+  }
+  throw new Error(`PDF qaytmadi (${String(res.headers.get("content-type") || "?").split(";")[0]})`);
+}
+
+/** 2-yo'l: visa.go.kr'ga to'g'ridan-to'g'ri POST. PDF bo'lsa Buffer, aks holda null. */
 async function fetchDirect({ url, params }) {
   let res;
   try {
@@ -36,10 +91,10 @@ async function fetchDirect({ url, params }) {
       redirect: "follow",
       signal: AbortSignal.timeout(30_000),
     });
-  } catch {
-    return null;
+  } catch (e) {
+    throw new Error(e?.name === "TimeoutError" ? "javob kutish vaqti tugadi" : "ulanib bo'lmadi");
   }
-  if (!isAllowedPdfUrl(res.url)) return null; // redirect boshqa domenga olib ketsa — rad
+  if (!isAllowedPdfUrl(res.url)) throw new Error("boshqa domenga yo'naltirdi"); // redirect boshqa domenga olib ketsa — rad
   const type = String(res.headers.get("content-type") || "").toLowerCase();
   if (!type.includes("pdf")) {
     await res.body?.cancel().catch(() => {});
@@ -181,7 +236,7 @@ function cdpClient(wsUrl) {
   };
 }
 
-/** 2-yo'l: headless Chromium bilan sahifani ochib, PDF'ga chop etish. */
+/** 3-yo'l: headless Chromium bilan sahifani ochib, PDF'ga chop etish. */
 async function renderWithChromium({ url, params }) {
   const chromium = findChromium();
   if (!chromium) throw new Error("Chromium o'rnatilmagan — PDF yaratib bo'lmaydi");
@@ -264,10 +319,30 @@ async function renderWithChromium({ url, params }) {
 // Bir vaqtda faqat bitta PDF (Chromium xotira talab qiladi)
 let queue = Promise.resolve();
 
-/** Elektron viza PDF'ini qaytaradi (Buffer). Xato bo'lsa — Error. */
+/**
+ * Elektron viza PDF'ini qaytaradi (Buffer). Usullar ketma-ket sinaladi:
+ *   1) visadoctors PDF xizmati  2) visa.go.kr to'g'ridan-to'g'ri  3) Chromium bilan chop etish.
+ * Hammasi muvaffaqiyatsiz bo'lsa — har birining sababi yozilgan Error.
+ */
 export function getVisaPdf(pdf) {
   if (!pdf || !isAllowedPdfUrl(pdf.url)) return Promise.reject(new Error("Elektron viza ma'lumoti yo'q"));
-  const job = queue.then(async () => (await fetchDirect(pdf)) || (await renderWithChromium(pdf)));
+  const job = queue.then(async () => {
+    const errors = [];
+    for (const [name, fn] of [["visadoctors", fetchViaVisadoctors], ["visa.go.kr", fetchDirect], ["Chromium", renderWithChromium]]) {
+      try {
+        const buf = await fn(pdf);
+        if (buf) {
+          console.log(`[pdf] olindi: ${name} (${Math.round(buf.length / 1024)} KB)`);
+          return buf;
+        }
+        errors.push(`${name}: PDF emas`);
+      } catch (e) {
+        errors.push(`${name}: ${e instanceof Error ? e.message : "xato"}`);
+      }
+    }
+    console.warn(`[pdf] olinmadi — ${errors.join(" | ")}`);
+    throw new Error(`PDF olinmadi. ${errors.join("; ")}`);
+  });
   queue = job.catch(() => {});
   return job;
 }

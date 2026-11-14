@@ -38,6 +38,8 @@ export const config = {
   // Faqat test uchun (production'da e'tiborga olinmaydi)
   upstream: !isProd && env.VISA_UPSTREAM_DEV ? env.VISA_UPSTREAM_DEV : "https://visadoctors.uz/api/en/visas/v2/check-status/",
   telegramApi: !isProd && env.TELEGRAM_API_DEV ? env.TELEGRAM_API_DEV : "https://api.telegram.org",
+  // visadoctors'ning PDF xizmati (pdf_url + pdf_params -> tayyor PDF)
+  pdfServiceUrl: !isProd && env.VISA_PDF_SERVICE_DEV ? env.VISA_PDF_SERVICE_DEV : "https://visadoctors.uz/api/uz/visas/download-pdf/",
   // Elektron viza sahifasi faqat shu domen(lar)dan
   pdfHosts: ["www.visa.go.kr", "visa.go.kr"],
   pdfHostsDev: !isProd && env.VISA_PDF_HOST_DEV ? [env.VISA_PDF_HOST_DEV] : [],

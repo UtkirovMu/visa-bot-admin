@@ -16,10 +16,13 @@ Panel [visabot](https://github.com/UtkirovMu/visabot) orqali ochiladi: adminda `
 
 ### Elektron viza PDF qanday olinadi
 
-`pdf_url` visa.go.kr'ning chop etish sahifasi bo'lib, unga `pdf_params` POST forma bilan yuboriladi.
+Usullar ketma-ket sinaladi:
 
-1. Server avval sahifani to'g'ridan-to'g'ri so'raydi. Javob PDF bo'lsa, o'zini yuboradi.
-2. HTML bo'lsa, server ichidagi headless Chromium (DevTools protokoli orqali) formani yuborib, sahifani xuddi brauzerdagidek cookie va surat bilan ochadi va PDF'ga chop etadi.
+1. **visadoctors PDF xizmati** (`POST /api/uz/visas/download-pdf/`, ichida `pdf_url` va `pdf_params`). Sayt ham PDF'ni shu orqali beradi.
+2. **visa.go.kr to'g'ridan-to'g'ri.** Javob PDF bo'lsa, o'zi ishlatiladi.
+3. **Headless Chromium** (DevTools protokoli orqali). Formani yuborib, sahifani brauzerdagidek cookie va surat bilan ochadi va PDF'ga chop etadi.
+
+Hammasi muvaffaqiyatsiz bo'lsa, panel va log har bir usulning sababini ko'rsatadi.
 
 Bu jarayonda Chromium faqat `*.go.kr` manzillariga so'rov yubora oladi, qolganlari bloklanadi. Bir vaqtda faqat bitta PDF yaratiladi (60 soniyalik chegara bilan), vaqtinchalik fayllar darhol o'chiriladi. `pdf_params` da shaxsiy ma'lumot bor, shuning uchun bazada shifrlangan holda saqlanadi.
 
@@ -71,7 +74,7 @@ Servis bitta nusxada ishlashi kerak (`railway.json` da `numReplicas: 1`), chunki
 ## Ishlab chiqish
 
 ```bash
-npm test     # 31 ta test: shifrlash, Telegram imzosi, rejalashtirgich, elektron viza PDF, to'liq API oqimi
+npm test     # 32 ta test: shifrlash, Telegram imzosi, rejalashtirgich, elektron viza PDF, to'liq API oqimi
 npm start    # BOT_TOKEN, ADMIN_IDS, DATA_KEY, DB_PATH kerak
 ```
 
