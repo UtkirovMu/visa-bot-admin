@@ -10,6 +10,7 @@ import { verifyInitData } from "./src/auth.js";
 import { config, validateConfig } from "./src/config.js";
 import { initCrypto } from "./src/crypto.js";
 import { addPerson, countPeople, deletePerson, getPerson, history, initDb, listPeople } from "./src/db.js";
+import { selfTestChromium } from "./src/pdf.js";
 import { checkPerson, deliverPdf, runAll, schedulerStatus, startScheduler, stopScheduler } from "./src/scheduler.js";
 import { fullName, maskPassport, parsePerson } from "./src/validate.js";
 
@@ -302,7 +303,10 @@ function main() {
   server.headersTimeout = 10_000;
   server.requestTimeout = 120_000; // "Hozir tekshirish" 1–2 daqiqagacha cho'zilishi mumkin
   server.keepAliveTimeout = 5_000;
-  server.listen(config.port, () => console.log(`[server] admin panel: http://0.0.0.0:${config.port} (adminlar: ${config.adminIds.size})`));
+  server.listen(config.port, () => {
+    console.log(`[server] admin panel: http://0.0.0.0:${config.port} (adminlar: ${config.adminIds.size})`);
+    selfTestChromium().catch(() => {}); // natija logda: "[pdf] Chromium tayyor" yoki xato sababi
+  });
 
   const stop = () => {
     stopScheduler();

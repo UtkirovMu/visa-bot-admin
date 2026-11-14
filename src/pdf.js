@@ -7,7 +7,7 @@
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { config } from "./config.js";
@@ -47,6 +47,93 @@ async function fetchDirect({ url, params }) {
   }
   const buf = Buffer.from(await res.arrayBuffer());
   return buf.length <= MAX_PDF && isPdf(buf) ? buf : null;
+}
+
+/**
+ * Chromium'ni ishga tushiradi va DevTools (CDP) manzilini qaytaradi.
+ * Konteynerda root'siz ishlaganda HOME yozib bo'lmaydigan bo'lishi mumkin — shuning uchun
+ * har safar vaqtinchalik HOME/XDG papkalari beriladi va crash-reporter (crashpad) o'chiriladi.
+ */
+async function launchChromium(chromium, dir) {
+  const home = join(dir, "home");
+  await mkdir(join(home, ".config"), { recursive: true, mode: 0o700 });
+  await mkdir(join(home, ".cache"), { recursive: true, mode: 0o700 });
+  await mkdir(join(dir, "crash"), { recursive: true, mode: 0o700 });
+
+  const proc = spawn(chromium, [
+    "--headless=new",
+    "--no-sandbox", // konteynerda kerak; tarmoq so'rovlari CDP orqali faqat *.go.kr bilan cheklanadi
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-default-apps",
+    "--disable-sync",
+    "--disable-breakpad",
+    "--disable-crash-reporter",
+    `--crash-dumps-dir=${join(dir, "crash")}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--mute-audio",
+    "--hide-scrollbars",
+    "--remote-debugging-port=0",
+    `--user-data-dir=${join(dir, "profile")}`,
+    `--user-agent=${UA}`,
+    "about:blank",
+  ], {
+    stdio: ["ignore", "ignore", "pipe"],
+    env: {
+      PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
+      HOME: home,
+      XDG_CONFIG_HOME: join(home, ".config"),
+      XDG_CACHE_HOME: join(home, ".cache"),
+      TMPDIR: dir,
+      LANG: "en_US.UTF-8",
+    },
+  });
+
+  let stderr = "";
+  const wsUrl = await new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("Chromium 20 soniyada ishga tushmadi")), 20_000);
+    proc.stderr.on("data", (d) => {
+      stderr = (stderr + d).slice(-6000);
+      const m = /DevTools listening on (ws:\/\/\S+)/.exec(stderr);
+      if (m) { clearTimeout(t); resolve(m[1]); }
+    });
+    proc.on("exit", (code, signal) => {
+      clearTimeout(t);
+      reject(new Error(`Chromium ishga tushmadi (kod ${code}, signal ${signal})`));
+    });
+    proc.on("error", (e) => { clearTimeout(t); reject(e); });
+  }).catch((e) => {
+    // Sabab logda ko'rinsin (shaxsiy ma'lumot yo'q — faqat Chromium xabarlari)
+    const tail = stderr.split("\n").filter((l) => l.trim()).slice(-8).join("\n");
+    console.error(`[pdf] ${e.message}\n${tail}`);
+    if (proc.exitCode === null) proc.kill("SIGKILL");
+    throw e;
+  });
+  return { proc, wsUrl };
+}
+
+/** Server ishga tushganda Chromium ishlashini tekshiradi (natija logga yoziladi). */
+export async function selfTestChromium() {
+  const chromium = findChromium();
+  if (!chromium) {
+    console.warn("[pdf] Chromium topilmadi — elektron viza faqat to'g'ridan-to'g'ri PDF bo'lsa yuboriladi");
+    return false;
+  }
+  const dir = await mkdtemp(join(tmpdir(), "visa-pdf-test-"));
+  try {
+    const { proc } = await launchChromium(chromium, dir);
+    proc.kill("SIGKILL");
+    console.log(`[pdf] Chromium tayyor (${chromium})`);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /** Chromium faqat shu manzillarga so'rov yubora oladi (qolgani bloklanadi). */
@@ -113,40 +200,11 @@ async function renderWithChromium({ url, params }) {
     const formUrl = `file://${formPath}`;
     await writeFile(formPath, html, { mode: 0o600 });
 
-    proc = spawn(chromium, [
-      "--headless=new",
-      "--no-sandbox", // konteynerda kerak; tarmoq so'rovlari quyida faqat *.go.kr bilan cheklangan
-      "--disable-gpu",
-      "--disable-dev-shm-usage",
-      "--disable-extensions",
-      "--disable-background-networking",
-      "--disable-component-update",
-      "--disable-default-apps",
-      "--disable-sync",
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--mute-audio",
-      "--hide-scrollbars",
-      "--remote-debugging-port=0",
-      `--user-data-dir=${join(dir, "profile")}`,
-      `--user-agent=${UA}`,
-      "about:blank",
-    ], { stdio: ["ignore", "ignore", "pipe"] });
+    const launched = await launchChromium(chromium, dir);
+    proc = launched.proc;
+    const wsUrl = launched.wsUrl;
 
     const run = (async () => {
-      // DevTools manzilini kutish
-      const wsUrl = await new Promise((resolve, reject) => {
-        let buf = "";
-        proc.stderr.on("data", (d) => {
-          buf += d;
-          const m = /DevTools listening on (ws:\/\/\S+)/.exec(buf);
-          if (m) resolve(m[1]);
-          if (buf.length > 100_000) buf = buf.slice(-2000);
-        });
-        proc.on("exit", (code) => reject(new Error(`Chromium ishga tushmadi (kod ${code})`)));
-        proc.on("error", reject);
-      });
-
       cdp = cdpClient(wsUrl);
       await cdp.opened;
       const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });

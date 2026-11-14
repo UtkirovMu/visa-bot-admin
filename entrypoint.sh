@@ -10,6 +10,8 @@ if [ "$(id -u)" = "0" ]; then
   chown -R node:node "$DATA_DIR"
   chmod 700 "$DATA_DIR"
   if command -v setpriv >/dev/null 2>&1; then
+    # setpriv HOME'ni o'zgartirmaydi — node foydalanuvchisining o'z papkasini beramiz
+    export HOME=/home/node USER=node
     exec setpriv --reuid=node --regid=node --init-groups -- node --disable-warning=ExperimentalWarning /app/server.js
   fi
   echo "[entrypoint] OGOHLANTIRISH: setpriv topilmadi, root sifatida ishlamoqda" >&2
